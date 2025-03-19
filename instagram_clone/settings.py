@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     "graphene_django",
     "social",
+    "graphql_jwt",
 ]
 
 MIDDLEWARE = [
@@ -63,7 +64,15 @@ MIDDLEWARE = [
 
 GRAPHENE = {
     "SCHEMA": "social.schema.schema",
+    "MIDDLEWARE": [
+        "graphql_jwt.middleware.JSONWebTokenMiddleware",
+    ],
 }
+
+AUTHENTICATION_BACKENDS = [
+    "graphql_jwt.backends.JSONWebTokenBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
 
 ROOT_URLCONF = 'instagram_clone.urls'
 

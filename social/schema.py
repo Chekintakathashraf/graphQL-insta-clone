@@ -3,7 +3,8 @@ from graphene_django import DjangoObjectType
 from django.contrib.auth import get_user_model
 from .models import *
 from graphene.types import Interface
-
+import graphql_jwt
+from graphql import GraphQLError
 
 User = get_user_model()
 
@@ -20,11 +21,11 @@ class ProfileType(DjangoObjectType):
         
 
         
-# ✅ Define an Interface for content types that can be commented on
+# Define an Interface for content types that can be commented on
 class CommentContentInterface(Interface):
     id = graphene.ID()
 
-# ✅ Apply the Interface to PostType and StoryType
+# apply the Interface to PostType and StoryType
 class PostType(DjangoObjectType):
     class Meta:
         model = Post
@@ -114,7 +115,37 @@ class CreateComment(graphene.Mutation):
         comment = Comment.objects.create(text=text, content_object=post, created_by=user)
         return CreateComment(comment=comment)
 
+# Authentication Mutations
+class ObtainToken(graphql_jwt.ObtainJSONWebToken):
+    user = graphene.Field(UserType)
+
+    def resolve_user(self, info, **kwargs):
+        return info.context.user
+
+class RefreshToken(graphql_jwt.Refresh):
+    pass
+
+class VerifyToken(graphql_jwt.Verify):
+    pass
+
+class RegisterUser(graphene.Mutation):
+    class Arguments:
+        username = graphene.String(required=True)
+        email = graphene.String(required=True)
+        password = graphene.String(required=True)
+
+    user = graphene.Field(UserType)
+
+    def mutate(self, info, username, email, password):
+        user = User.objects.create_user(username=username, email=email, password=password)
+        return RegisterUser(user=user)
+
 class Mutation(graphene.ObjectType):
+    
+    register_user = RegisterUser.Field()
+    token_auth = ObtainToken.Field()
+    verify_token = VerifyToken.Field()
+    refresh_token = RefreshToken.Field()
     create_post = CreatePost.Field()
     create_comment = CreateComment.Field()
 
@@ -133,6 +164,8 @@ class Query(graphene.ObjectType):
         return User.objects.all()
     
     def resolve_posts(self, info):
+        if not info.context.user.is_authenticated:
+            raise GraphQLError("Authentication required!")
         return Post.objects.all()
     
     def resolve_comments(self, info):

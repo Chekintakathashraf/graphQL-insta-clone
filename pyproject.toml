@@ -11,4 +11,6 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "pillow>=11.1.0",
     "faker>=37.0.1",
+    "django-graphql-jwt>=0.4.0",
+    "graphene-file-upload>=1.3.0",
 ]
