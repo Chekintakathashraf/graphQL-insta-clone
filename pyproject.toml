@@ -9,4 +9,5 @@ dependencies = [
     "django>=5.1.7",
     "graphene-django>=3.2.3",
     "python-dotenv>=1.0.1",
+    "pillow>=11.1.0",
 ]
