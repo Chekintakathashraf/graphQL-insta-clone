@@ -6,6 +6,9 @@ from graphene.types import Interface
 import graphql_jwt
 from graphql import GraphQLError
 
+from graphene_file_upload.scalars import Upload
+
+
 User = get_user_model()
 
 class UserType(DjangoObjectType):
@@ -18,7 +21,35 @@ class ProfileType(DjangoObjectType):
         model = Profile
         fields = "__all__"
 
-        
+from django.core.files.storage import default_storage
+
+class UploadProfilePicture(graphene.Mutation):
+    class Arguments:
+        profile_picture = Upload(required=True)
+
+    success = graphene.Boolean()
+    profile = graphene.Field(ProfileType)
+
+    def mutate(self, info, profile_picture):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("Authentication required!")
+
+        profile, _ = Profile.objects.get_or_create(user=user)
+
+        # Save file to media storage
+        file_path = default_storage.save(f"profile_pics/{profile_picture.name}", profile_picture)
+        profile.profile_picture = file_path
+        profile.save()
+
+        return UploadProfilePicture(success=True, profile=profile)
+
+
+
+
+
+    
+       
 
         
 # Define an Interface for content types that can be commented on
@@ -52,6 +83,30 @@ class CommentType(DjangoObjectType):
             return self.content_object
         return None
 
+class UploadPostImage(graphene.Mutation):
+    class Arguments:
+        image = Upload(required=True)
+        caption = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    post = graphene.Field(PostType)
+
+    def mutate(self, info, image, caption):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("Authentication required!")
+
+        # Save file properly
+        file_path = default_storage.save(f"post_images/{image.name}", image)
+
+        post = Post.objects.create(
+            created_by=user,
+            image=file_path,
+            caption=caption
+        )
+        return UploadPostImage(success=True, post=post)
+
+
 
 
 class MessageType(DjangoObjectType):
@@ -82,7 +137,7 @@ class ReportType(DjangoObjectType):
 class CreatePost(graphene.Mutation):
     class Arguments:
         caption = graphene.String(required=True)
-        image = graphene.String(required=True)
+        image = Upload(required=True)  #  Fix: Use Upload for file handling
         created_by = graphene.ID(required=True)
 
     post = graphene.Field(PostType)
@@ -90,15 +145,18 @@ class CreatePost(graphene.Mutation):
     def mutate(self, info, caption, image, created_by):
         user = User.objects.get(id=created_by)
 
-        # ✅ Set both created_by and updated_by to avoid NOT NULL errors
+        #  Save image properly
+        file_path = default_storage.save(f"post_images/{image.name}", image)
+
         post = Post.objects.create(
             caption=caption,
-            image=image,
+            image=file_path,
             created_by=user,
-            updated_by=user  # ✅ Fix: Assign same user to updated_by
+            updated_by=user  # Fix: Assign same user to updated_by
         )
 
         return CreatePost(post=post)
+
 
 
 class CreateComment(graphene.Mutation):
@@ -140,6 +198,61 @@ class RegisterUser(graphene.Mutation):
         user = User.objects.create_user(username=username, email=email, password=password)
         return RegisterUser(user=user)
 
+class PostLikeType(DjangoObjectType):
+    class Meta:
+        model = PostLike
+
+class FollowType(DjangoObjectType):
+    class Meta:
+        model = Follow
+
+class LikePost(graphene.Mutation):
+    class Arguments:
+        post_id = graphene.ID(required=True)
+
+    success = graphene.Boolean()
+
+    def mutate(self, info, post_id):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("Authentication required!")
+
+        post = Post.objects.get(id=post_id)
+
+        # Check if user already liked
+        like, created = PostLike.objects.get_or_create(user=user, post=post)
+
+        if not created:
+            like.delete()  # Unlike the post if already liked
+            return LikePost(success=False)
+        
+        return LikePost(success=True)
+
+class FollowUser(graphene.Mutation):
+    class Arguments:
+        user_id = graphene.ID(required=True)
+
+    success = graphene.Boolean()
+
+    def mutate(self, info, user_id):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("Authentication required!")
+
+        following = User.objects.get(id=user_id)
+        if user == following:
+            raise GraphQLError("You cannot follow yourself!")
+
+        follow, created = Follow.objects.get_or_create(follower=user, following=following)
+
+        if not created:
+            follow.delete()  # Unfollow if already followed
+            return FollowUser(success=False)
+
+        return FollowUser(success=True)
+
+
+
 class Mutation(graphene.ObjectType):
     
     register_user = RegisterUser.Field()
@@ -148,6 +261,12 @@ class Mutation(graphene.ObjectType):
     refresh_token = RefreshToken.Field()
     create_post = CreatePost.Field()
     create_comment = CreateComment.Field()
+    
+    upload_profile_picture = UploadProfilePicture.Field()
+    upload_post_image = UploadPostImage.Field()
+    
+    like_post = LikePost.Field()
+    follow_user = FollowUser.Field()
 
 class Query(graphene.ObjectType):
     users = graphene.List(UserType)
@@ -161,15 +280,28 @@ class Query(graphene.ObjectType):
     reports = graphene.List(ReportType)
     
     def resolve_users(self, info):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("Authentication required!")
+
         return User.objects.all()
+
     
     def resolve_posts(self, info):
-        if not info.context.user.is_authenticated:
+        user = info.context.user
+        if not user.is_authenticated:
             raise GraphQLError("Authentication required!")
-        return Post.objects.all()
+
+        return Post.objects.filter(created_by=user)  # ✅ Only return the user's posts
+
     
     def resolve_comments(self, info):
-        return Comment.objects.all()
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("Authentication required!")
+
+        return Comment.objects.filter(content_object__created_by=user)  # ✅ Filter by user
+
     
     def resolve_stories(self, info):
         return Story.objects.all()

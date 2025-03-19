@@ -100,6 +100,7 @@ class PostSave(BaseModel):
         return f"{self.user.username} saved a post"
 
 
+
 # Report Model
 class Report(BaseModel):
     reported_by = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -110,3 +111,26 @@ class Report(BaseModel):
 
     def __str__(self):
         return f"Report by {self.reported_by.username}"
+
+
+class PostLike(BaseModel):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="post_likes")  # Changed from "likes" to "post_likes"
+
+    class Meta:
+        unique_together = ("user", "post")  # Prevent duplicate likes
+
+
+class Follow(BaseModel):
+    follower = models.ForeignKey(User, on_delete=models.CASCADE, related_name="following")
+    following = models.ForeignKey(User, on_delete=models.CASCADE, related_name="followers")
+
+    class Meta:
+        unique_together = ('follower', 'following')  # Prevent duplicate follows
+
+
+
+
+
+
+
